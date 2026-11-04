@@ -16,12 +16,31 @@ import { Pool, PoolClient } from "pg";
 export function resolveDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string | undefined {
   return env.DATABASE_URL || env.POSTGRES_URL_NON_POOLING || env.POSTGRES_URL;
 }
+// Supabase's Postgres endpoints present a self-signed certificate chain.
+// Newer node-postgres treats sslmode=require as verify-full, so a plain
+// connection string fails on Vercel with SELF_SIGNED_CERT_IN_CHAIN (seen in
+// the 2026-11-04 build log, before any Next.js build output). Supabase's own
+// pg guidance for its pooler is rejectUnauthorized: false: traffic stays
+// encrypted, but the server certificate identity is not verified. That
+// trade-off is scoped to Supabase hosts only; local and other hosts keep
+// the previous behaviour (no SSL override).
+export function resolvePoolSsl(url: string): { rejectUnauthorized: false } | undefined {
+  try {
+    const host = new URL(url).hostname;
+    if (host.endsWith(".supabase.co") || host.endsWith(".pooler.supabase.com")) {
+      return { rejectUnauthorized: false };
+    }
+  } catch {
+    // Unparseable URL: let Pool surface its own error, as before.
+  }
+  return undefined;
+}
 let pool: Pool | null = null;
 export function getPool(): Pool {
   if (!pool) {
     const url = resolveDatabaseUrl();
     if (!url) throw new Error("DATABASE_URL (or POSTGRES_URL_NON_POOLING / POSTGRES_URL) is not set. See .env.example.");
-    pool = new Pool({ connectionString: url, max: 20 });
+    pool = new Pool({ connectionString: url, max: 20, ssl: resolvePoolSsl(url) });
     pool.on("error", (err) => console.error(JSON.stringify({ level: "error", msg: "pg pool error", err: String(err) })));
   }
   return pool;
