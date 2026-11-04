@@ -1,0 +1,2 @@
+order_number,order_date,channel_name,status,payment_status,customer_name,sku,quantity,unit_price,discount,unit_cost,shipping_charged
+ORD-1001,2026-11-04,Instagram,Confirmed,Unpaid,Sample Customer,SKU-TEE-001,2,1500,0,800,200
