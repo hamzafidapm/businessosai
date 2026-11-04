@@ -19,28 +19,36 @@ export function resolveDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string
 // Supabase's Postgres endpoints present a self-signed certificate chain.
 // Newer node-postgres treats sslmode=require as verify-full, so a plain
 // connection string fails on Vercel with SELF_SIGNED_CERT_IN_CHAIN (seen in
-// the 2026-11-04 build log, before any Next.js build output). Supabase's own
-// pg guidance for its pooler is rejectUnauthorized: false: traffic stays
+// the 2026-11-04 build logs, before any Next.js build output).
+//
+// The fix must live in the connection string itself, not in a separate
+// `ssl` Pool option: pg's ConnectionParameters re-parses connectionString
+// and overwrites a caller-supplied ssl object with the parsed value, which
+// is why the first attempt (ssl: { rejectUnauthorized: false } alongside
+// the original URL) still failed with the same error on Vercel.
+// sslmode=no-verify makes pg set rejectUnauthorized: false: traffic stays
 // encrypted, but the server certificate identity is not verified. That
 // trade-off is scoped to Supabase hosts only; local and other hosts keep
-// the previous behaviour (no SSL override).
-export function resolvePoolSsl(url: string): { rejectUnauthorized: false } | undefined {
+// the previous behaviour, and the rest of the URL is left byte-identical
+// (only the sslmode parameter is replaced or appended).
+export function withSupabaseSsl(url: string): string {
+  let host = "";
   try {
-    const host = new URL(url).hostname;
-    if (host.endsWith(".supabase.co") || host.endsWith(".pooler.supabase.com")) {
-      return { rejectUnauthorized: false };
-    }
+    host = new URL(url).hostname;
   } catch {
     // Unparseable URL: let Pool surface its own error, as before.
+    return url;
   }
-  return undefined;
+  if (!host.endsWith(".supabase.co") && !host.endsWith(".pooler.supabase.com")) return url;
+  if (/[?&]sslmode=[^&]*/.test(url)) return url.replace(/([?&]sslmode=)[^&]*/, "$1no-verify");
+  return url + (url.includes("?") ? "&" : "?") + "sslmode=no-verify";
 }
 let pool: Pool | null = null;
 export function getPool(): Pool {
   if (!pool) {
     const url = resolveDatabaseUrl();
     if (!url) throw new Error("DATABASE_URL (or POSTGRES_URL_NON_POOLING / POSTGRES_URL) is not set. See .env.example.");
-    pool = new Pool({ connectionString: url, max: 20, ssl: resolvePoolSsl(url) });
+    pool = new Pool({ connectionString: withSupabaseSsl(url), max: 20 });
     pool.on("error", (err) => console.error(JSON.stringify({ level: "error", msg: "pg pool error", err: String(err) })));
   }
   return pool;

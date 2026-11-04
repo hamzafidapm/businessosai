@@ -1,21 +1,25 @@
 import { describe, it, expect } from "vitest";
-import { resolvePoolSsl } from "../src/lib/db";
+import { withSupabaseSsl } from "../src/lib/db";
 
-describe("resolvePoolSsl", () => {
-  it("disables certificate verification for Supabase pooler hosts (self-signed chain)", () => {
-    expect(resolvePoolSsl("postgres://user:pass@aws-0-eu-central-1.pooler.supabase.com:6543/postgres?sslmode=require")).toEqual({
-      rejectUnauthorized: false,
-    });
+describe("withSupabaseSsl", () => {
+  it("rewrites sslmode to no-verify for Supabase pooler hosts (self-signed chain)", () => {
+    expect(
+      withSupabaseSsl("postgres://user:pass@aws-0-eu-central-1.pooler.supabase.com:6543/postgres?sslmode=require")
+    ).toBe("postgres://user:pass@aws-0-eu-central-1.pooler.supabase.com:6543/postgres?sslmode=no-verify");
   });
 
-  it("disables certificate verification for direct Supabase hosts", () => {
-    expect(resolvePoolSsl("postgres://user:pass@db.abcdefgh.supabase.co:5432/postgres?sslmode=require")).toEqual({
-      rejectUnauthorized: false,
-    });
+  it("appends sslmode=no-verify for direct Supabase hosts without one, preserving other params", () => {
+    expect(withSupabaseSsl("postgres://user:pass@db.abcdefgh.supabase.co:5432/postgres?foo=bar")).toBe(
+      "postgres://user:pass@db.abcdefgh.supabase.co:5432/postgres?foo=bar&sslmode=no-verify"
+    );
   });
 
-  it("leaves SSL untouched for local and other hosts", () => {
-    expect(resolvePoolSsl("postgres://user:pass@localhost:5432/db")).toBeUndefined();
-    expect(resolvePoolSsl("postgres://user:pass@db.example.com:5432/db")).toBeUndefined();
+  it("leaves local and other hosts byte-identical", () => {
+    expect(withSupabaseSsl("postgres://user:pass@localhost:5432/db?sslmode=require")).toBe(
+      "postgres://user:pass@localhost:5432/db?sslmode=require"
+    );
+    expect(withSupabaseSsl("postgres://user:pass@db.example.com:5432/db")).toBe(
+      "postgres://user:pass@db.example.com:5432/db"
+    );
   });
 });
