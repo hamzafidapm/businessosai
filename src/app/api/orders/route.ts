@@ -4,6 +4,7 @@ import { parseBody, orderSchema } from "@/lib/validation";
 import { errorResponse } from "@/lib/errors";
 import { requireWrite } from "@/lib/tenant";
 import { audit, scrub } from "@/lib/audit";
+import { deductStockForOrder } from "@/lib/inventory";
 export async function GET(req: Request) {
   try {
     const ctx = await getCtx(req);
@@ -44,6 +45,9 @@ export async function POST(req: Request) {
           [ctx.workspaceId, o.id, productId, item.sku, item.product_name || null, item.quantity, item.unit_price, item.discount, item.refund_amount, snapshotCost]);
       }
       await c.query("INSERT INTO order_status_events (workspace_id, order_id, old_status, new_status, source, actor_id) VALUES ($1,$2,NULL,$3,'manual',$4)", [ctx.workspaceId, o.id, data.status, ctx.user.id]);
+      if (data.status === "Shipped" || data.status === "Delivered") {
+        await deductStockForOrder(c, ctx.workspaceId, o.id, ctx.user.id);
+      }
       return o;
     });
     await audit(ctx.workspaceId, ctx.user.id, "order_created", "order", order.id, null, scrub(order));
